@@ -23,6 +23,9 @@ FEATURES = [
 
 
 def calculate_status(prediction: int, score: float) -> str:
+    """
+    تعیین وضعیت لحظه‌ای یک اندازه‌گیری.
+    """
     if prediction == 1:
         return "Normal"
 
@@ -32,10 +35,33 @@ def calculate_status(prediction: int, score: float) -> str:
     return "Warning"
 
 
+def calculate_stable_status(
+    status_history: list[str],
+) -> str:
+    """
+    تعیین وضعیت پایدار با بررسی سه اندازه‌گیری اخیر.
+    """
+    if len(status_history) < 3:
+        return status_history[-1]
+
+    last_three_statuses = status_history[-3:]
+
+    if last_three_statuses.count("Danger") >= 3:
+        return "Danger"
+
+    if last_three_statuses.count("Warning") >= 2:
+        return "Warning"
+
+    return "Normal"
+
+
 def create_sensor_reading(
     index: int,
     rng: np.random.Generator,
-) -> dict:
+) -> dict[str, float]:
+    """
+    تولید داده‌ی شبیه‌سازی‌شده برای دما، فشار و ارتعاش.
+    """
     temperature = rng.normal(65, 1.5)
     pressure = rng.normal(5.0, 0.15)
     vibration = rng.normal(0.35, 0.04)
@@ -60,10 +86,11 @@ def main() -> None:
 
     previous_reading = None
     results = []
+    status_history = []
 
     print("Live monitoring started")
     print("Press Ctrl+C to stop")
-    print("-" * 40)
+    print("-" * 70)
 
     for index in range(30):
         reading = create_sensor_reading(index, rng)
@@ -77,17 +104,26 @@ def main() -> None:
                 reading["temperature"]
                 - previous_reading["temperature"]
             )
+
             pressure_change = (
                 reading["pressure"]
                 - previous_reading["pressure"]
             )
+
             vibration_change = (
                 reading["vibration"]
                 - previous_reading["vibration"]
             )
 
+        timestamp = datetime.now()
+
         row = {
-            "timestamp": datetime.now(),
+            "timestamp": timestamp,
+            "date": timestamp.date(),
+            "time": timestamp.time(),
+            "day_of_week": timestamp.strftime("%A"),
+            "day_of_week_number": timestamp.weekday(),
+            "hour": timestamp.hour,
             "temperature": reading["temperature"],
             "temperature_change": temperature_change,
             "pressure": reading["pressure"],
@@ -99,29 +135,50 @@ def main() -> None:
         input_data = pd.DataFrame([row])[FEATURES]
 
         prediction = int(model.predict(input_data)[0])
-        score = float(model.decision_function(input_data)[0])
-        status = calculate_status(prediction, score)
+        anomaly_score = float(model.decision_function(input_data)[0])
 
-        row["anomaly_score"] = score
-        row["predicted_status"] = status
+        instant_status = calculate_status(
+            prediction,
+            anomaly_score,
+        )
+
+        status_history.append(instant_status)
+
+        stable_status = calculate_stable_status(status_history)
+
+        row["model_prediction"] = prediction
+        row["anomaly_score"] = anomaly_score
+        row["instant_status"] = instant_status
+        row["predicted_status"] = stable_status
+
         results.append(row)
 
         print(
-            f"{row['timestamp']} | "
-            f"Temp: {row['temperature']:.2f} | "
-            f"Pressure: {row['pressure']:.2f} | "
-            f"Vibration: {row['vibration']:.2f} | "
-            f"Status: {status}"
+            f"{timestamp} | "
+            f"Temp: {reading['temperature']:.2f} | "
+            f"Pressure: {reading['pressure']:.2f} | "
+            f"Vibration: {reading['vibration']:.2f} | "
+            f"Instant: {instant_status} | "
+            f"Stable: {stable_status}"
         )
 
         previous_reading = reading
+
         time.sleep(0.5)
 
     output = pd.DataFrame(results)
-    LIVE_RESULTS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    output.to_csv(LIVE_RESULTS_PATH, index=False)
 
-    print("-" * 40)
+    LIVE_RESULTS_PATH.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    output.to_csv(
+        LIVE_RESULTS_PATH,
+        index=False,
+    )
+
+    print("-" * 70)
     print(f"Live results saved to: {LIVE_RESULTS_PATH}")
 
 
