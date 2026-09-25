@@ -1,6 +1,13 @@
+.env
+.env.*
+!.env.example
+
 venv/
+.venv/
 __pycache__/
 *.pyc
-.ipynb_checkpoints/
-.vscode/
-.env
+
+telegram_log.txt
+
+data/metropt3_dataset.zip
+data/MetroPT3.csv
