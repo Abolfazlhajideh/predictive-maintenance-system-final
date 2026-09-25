@@ -1,12 +1,8 @@
 import html
 import os
+import time
 from pathlib import Path
 
-import matplotlib
-
-matplotlib.use("Agg")
-
-import matplotlib.pyplot as plt
 import pandas as pd
 import requests
 from dotenv import load_dotenv
@@ -26,12 +22,12 @@ if not BOT_TOKEN:
 if not CHAT_ID:
     raise ValueError("TELEGRAM_CHAT_ID is missing from .env")
 
-CSV_FILE = RESULTS_DIR / "predictions.csv"
+BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
+
+CSV_FILE = RESULTS_DIR / "live_predictions.csv"
 
 if not CSV_FILE.exists():
     raise FileNotFoundError(f"File not found: {CSV_FILE}")
-
-BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 session = requests.Session()
 session.trust_env = False
@@ -42,14 +38,14 @@ session.proxies.update({
 
 
 def find_column(dataframe, names):
-    normalized_columns = {
+    normalized = {
         str(column).strip().lower(): column
         for column in dataframe.columns
     }
 
     for name in names:
-        if name.lower() in normalized_columns:
-            return normalized_columns[name.lower()]
+        if name.lower() in normalized:
+            return normalized[name.lower()]
 
     for column in dataframe.columns:
         column_text = str(column).strip().lower()
@@ -61,7 +57,7 @@ def find_column(dataframe, names):
     return None
 
 
-def numeric_value(value, digits=2):
+def format_value(value, digits=2):
     if pd.isna(value):
         return "نامشخص"
 
@@ -79,7 +75,7 @@ def send_message(text):
             "text": text,
             "parse_mode": "HTML",
         },
-        timeout=30,
+        timeout=(60, 120),
     )
 
     print("Message status:", response.status_code)
@@ -88,138 +84,108 @@ def send_message(text):
 
 
 def send_document(file_path, caption):
-    with file_path.open("rb") as document:
-        response = session.post(
-            f"{BASE_URL}/sendDocument",
-            data={
-                "chat_id": CHAT_ID,
-                "caption": caption,
-            },
-            files={
-                "document": (
-                    file_path.name,
-                    document,
-                ),
-            },
-            timeout=(20, 180),
-        )
+    max_size = 45 * 1024 * 1024
 
-    print(f"{file_path.name} status:", response.status_code)
-    print(response.text)
-    response.raise_for_status()
+    if file_path.stat().st_size > max_size:
+        print(f"Skipped large file: {file_path.name}")
+        return
+
+    for attempt in range(1, 4):
+        try:
+            print(
+                f"Uploading {file_path.name} "
+                f"(attempt {attempt}/3)..."
+            )
+
+            with file_path.open("rb") as document:
+                response = session.post(
+                    f"{BASE_URL}/sendDocument",
+                    data={
+                        "chat_id": CHAT_ID,
+                        "caption": caption,
+                    },
+                    files={
+                        "document": (
+                            file_path.name,
+                            document,
+                        ),
+                    },
+                    timeout=(60, 900),
+                )
+
+            print(
+                f"{file_path.name} status:",
+                response.status_code,
+            )
+            print(response.text)
+            response.raise_for_status()
+            return
+
+        except requests.exceptions.RequestException as error:
+            print(
+                f"Upload failed for {file_path.name}: {error}"
+            )
+
+            if attempt == 3:
+                raise
+
+            time.sleep(10)
 
 
 def send_photo(file_path, caption):
-    with file_path.open("rb") as photo:
-        response = session.post(
-            f"{BASE_URL}/sendPhoto",
-            data={
-                "chat_id": CHAT_ID,
-                "caption": caption,
-            },
-            files={
-                "photo": (
-                    file_path.name,
-                    photo,
-                ),
-            },
-            timeout=(20, 180),
-        )
+    max_size = 10 * 1024 * 1024
 
-    print(f"{file_path.name} status:", response.status_code)
-    print(response.text)
-    response.raise_for_status()
+    if file_path.stat().st_size > max_size:
+        print(f"Skipped large photo: {file_path.name}")
+        return
 
-
-def create_charts(dataframe, status_column, temperature_column,
-                  pressure_column, vibration_column, anomaly_column):
-    chart_files = []
-
-    numeric_columns = []
-
-    for column in [
-        temperature_column,
-        pressure_column,
-        vibration_column,
-        anomaly_column,
-    ]:
-        if column is not None and column not in numeric_columns:
-            numeric_columns.append(column)
-
-    if numeric_columns:
-        figure, axes = plt.subplots(
-            len(numeric_columns),
-            1,
-            figsize=(12, 3.5 * len(numeric_columns)),
-            squeeze=False,
-        )
-
-        axes = axes.flatten()
-
-        for axis, column in zip(axes, numeric_columns):
-            values = pd.to_numeric(
-                dataframe[column],
-                errors="coerce",
+    for attempt in range(1, 4):
+        try:
+            print(
+                f"Uploading photo {file_path.name} "
+                f"(attempt {attempt}/3)..."
             )
 
-            axis.plot(
-                range(1, len(values) + 1),
-                values,
-                marker="o",
-                linewidth=1.5,
+            with file_path.open("rb") as photo:
+                response = session.post(
+                    f"{BASE_URL}/sendPhoto",
+                    data={
+                        "chat_id": CHAT_ID,
+                        "caption": caption,
+                    },
+                    files={
+                        "photo": (
+                            file_path.name,
+                            photo,
+                        ),
+                    },
+                    timeout=(60, 300),
+                )
+
+            print(
+                f"{file_path.name} status:",
+                response.status_code,
+            )
+            print(response.text)
+            response.raise_for_status()
+            return
+
+        except requests.exceptions.RequestException as error:
+            print(
+                f"Photo upload failed for {file_path.name}: "
+                f"{error}"
             )
 
-            axis.set_title(str(column))
-            axis.set_xlabel("Measurement number")
-            axis.set_ylabel(str(column))
-            axis.grid(True, alpha=0.3)
+            if attempt == 3:
+                raise
 
-        figure.tight_layout()
-
-        sensor_chart = RESULTS_DIR / "sensor_trends.png"
-        figure.savefig(sensor_chart, dpi=160, bbox_inches="tight")
-        plt.close(figure)
-
-        chart_files.append(sensor_chart)
-
-    if status_column is not None:
-        status_values = (
-            dataframe[status_column]
-            .astype(str)
-            .str.strip()
-            .str.title()
-        )
-
-        counts = status_values.value_counts()
-
-        figure, axis = plt.subplots(figsize=(8, 5))
-
-        counts.plot(
-            kind="bar",
-            ax=axis,
-            color=["#2ca02c", "#ffbf00", "#d62728"],
-        )
-
-        axis.set_title("Device Status Distribution")
-        axis.set_xlabel("Status")
-        axis.set_ylabel("Count")
-        axis.grid(axis="y", alpha=0.3)
-
-        figure.tight_layout()
-
-        status_chart = RESULTS_DIR / "status_distribution.png"
-        figure.savefig(status_chart, dpi=160, bbox_inches="tight")
-        plt.close(figure)
-
-        chart_files.append(status_chart)
-
-    return chart_files
+            time.sleep(10)
 
 
 data = pd.read_csv(CSV_FILE)
 
 if data.empty:
-    raise ValueError("predictions.csv is empty")
+    raise ValueError("live_predictions.csv is empty")
 
 status_column = find_column(
     data,
@@ -237,27 +203,36 @@ status_column = find_column(
 temperature_column = find_column(
     data,
     [
+        "Oil_temperature",
         "temperature",
         "temp",
-        "temperature_c",
         "دما",
     ],
 )
 
-pressure_column = find_column(
+tp2_column = find_column(
     data,
     [
+        "TP2",
         "pressure",
         "فشار",
     ],
 )
 
-vibration_column = find_column(
+tp3_column = find_column(
     data,
     [
-        "vibration",
-        "vib",
-        "ارتعاش",
+        "TP3",
+    ],
+)
+
+motor_current_column = find_column(
+    data,
+    [
+        "Motor_current",
+        "motor_current",
+        "current",
+        "جریان",
     ],
 )
 
@@ -268,7 +243,6 @@ anomaly_column = find_column(
         "anomaly",
         "score",
         "امتیاز ناهنجاری",
-        "ناهنجاری",
     ],
 )
 
@@ -299,39 +273,42 @@ if status_column is not None:
 last_row = data.iloc[-1]
 
 last_temperature = (
-    numeric_value(last_row[temperature_column])
+    format_value(last_row[temperature_column])
     if temperature_column is not None
     else "نامشخص"
 )
 
-last_pressure = (
-    numeric_value(last_row[pressure_column])
-    if pressure_column is not None
+last_tp2 = (
+    format_value(last_row[tp2_column])
+    if tp2_column is not None
     else "نامشخص"
 )
 
-last_vibration = (
-    numeric_value(last_row[vibration_column])
-    if vibration_column is not None
+last_tp3 = (
+    format_value(last_row[tp3_column])
+    if tp3_column is not None
+    else "نامشخص"
+)
+
+last_motor_current = (
+    format_value(
+        last_row[motor_current_column],
+        4,
+    )
+    if motor_current_column is not None
     else "نامشخص"
 )
 
 last_anomaly = (
-    numeric_value(last_row[anomaly_column], 4)
+    format_value(
+        last_row[anomaly_column],
+        4,
+    )
     if anomaly_column is not None
     else "نامشخص"
 )
 
-chart_files = create_charts(
-    data,
-    status_column,
-    temperature_column,
-    pressure_column,
-    vibration_column,
-    anomaly_column,
-)
-
-report = f"""📊 <b>گزارش پایش دستگاه</b>
+report_text = f"""📊 <b>گزارش پایش کمپرسور MetroPT-3</b>
 
 تعداد اندازه‌گیری‌ها: <b>{measurement_count}</b>
 Normal: <b>{normal_count}</b>
@@ -339,25 +316,29 @@ Warning: <b>{warning_count}</b>
 Danger: <b>{danger_count}</b>
 
 آخرین وضعیت: <b>{html.escape(str(last_status))}</b>
-آخرین دما: <b>{last_temperature}</b>
-آخرین فشار: <b>{last_pressure}</b>
-آخرین ارتعاش: <b>{last_vibration}</b>
+آخرین دمای روغن: <b>{last_temperature}</b>
+آخرین فشار TP2: <b>{last_tp2}</b>
+آخرین فشار TP3: <b>{last_tp3}</b>
+آخرین جریان موتور: <b>{last_motor_current}</b>
 امتیاز ناهنجاری: <b>{last_anomaly}</b>
 
-🕒 این گزارش بر اساس آخرین داده‌های فایل ساخته شد.
+📁 منبع گزارش: <code>{CSV_FILE.name}</code>
 """
 
-send_message(report)
+send_message(report_text)
 
-files_to_send = []
+files_to_send = [
+    RESULTS_DIR / "live_predictions.csv",
+    RESULTS_DIR / "metropt3_analysis.png",
+    RESULTS_DIR / "sensor_trends.png",
+    RESULTS_DIR / "status_distribution.png",
+]
 
-for file_path in sorted(RESULTS_DIR.iterdir()):
-    if file_path.is_file():
-        files_to_send.append(file_path)
-
-for chart_file in chart_files:
-    if chart_file not in files_to_send:
-        files_to_send.append(chart_file)
+files_to_send = [
+    file_path
+    for file_path in files_to_send
+    if file_path.exists()
+]
 
 for file_path in files_to_send:
     if file_path.suffix.lower() in {
@@ -375,4 +356,5 @@ for file_path in files_to_send:
             f"📎 فایل پایش: {file_path.name}",
         )
 
-print("Monitoring report and all result files sent successfully.")
+print()
+print("Monitoring report and selected files sent successfully.")
