@@ -1,123 +1,96 @@
 from pathlib import Path
 
 import joblib
-import matplotlib.pyplot as plt
 import pandas as pd
 from sklearn.ensemble import IsolationForest
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-DATA_PATH = PROJECT_ROOT / "data" / "raw" / "sensor_data.csv"
-MODEL_PATH = PROJECT_ROOT / "models" / "isolation_forest_model.pkl"
-RESULTS_PATH = PROJECT_ROOT / "results" / "predictions.csv"
-FIGURE_PATH = PROJECT_ROOT / "results" / "figures" / "device_status.png"
+INPUT_FILE = (
+    PROJECT_ROOT
+    / "data"
+    / "metropt3_features.csv"
+)
 
-FEATURES = [
-    "temperature",
-    "temperature_change",
-    "pressure",
-    "pressure_change",
-    "vibration",
-    "vibration_change",
+MODELS_DIR = PROJECT_ROOT / "models"
+MODELS_DIR.mkdir(exist_ok=True)
+
+MODEL_FILE = (
+    MODELS_DIR
+    / "metropt3_isolation_forest.pkl"
+)
+
+META_FILE = (
+    MODELS_DIR
+    / "metropt3_model_features.txt"
+)
+
+
+if not INPUT_FILE.exists():
+    raise FileNotFoundError(
+        f"Feature file not found: {INPUT_FILE}"
+    )
+
+
+print("Reading engineered features...")
+
+data = pd.read_csv(INPUT_FILE)
+
+excluded_columns = [
+    "timestamp",
+    "status",
+    "anomaly_score",
+    "anomaly_prediction",
 ]
 
+feature_columns = [
+    column
+    for column in data.columns
+    if column not in excluded_columns
+]
 
-def load_data() -> pd.DataFrame:
-    data = pd.read_csv(DATA_PATH)
-    data["timestamp"] = pd.to_datetime(data["timestamp"])
+model_data = data[feature_columns].apply(
+    pd.to_numeric,
+    errors="coerce",
+)
 
-    data[FEATURES] = data[FEATURES].fillna(0)
+model_data = model_data.replace(
+    [float("inf"), float("-inf")],
+    pd.NA,
+)
 
-    return data
+model_data = model_data.dropna()
 
-
-def train_model(data: pd.DataFrame) -> IsolationForest:
-    model = IsolationForest(
-        n_estimators=150,
-        contamination=0.20,
-        random_state=42,
-        n_jobs=-1,
+if model_data.empty:
+    raise ValueError(
+        "No valid rows available for training."
     )
 
-    model.fit(data[FEATURES])
 
-    return model
+print(f"Training rows: {len(model_data)}")
+print(f"Feature count: {len(feature_columns)}")
 
+model = IsolationForest(
+    n_estimators=200,
+    contamination=0.01,
+    random_state=42,
+    n_jobs=-1,
+)
 
-def create_predictions(
-    data: pd.DataFrame,
-    model: IsolationForest,
-) -> pd.DataFrame:
-    data = data.copy()
+model.fit(model_data)
 
-    data["model_prediction"] = model.predict(data[FEATURES])
-    data["anomaly_score"] = model.decision_function(data[FEATURES])
+joblib.dump(
+    model,
+    MODEL_FILE,
+)
 
-    data["predicted_status"] = data["model_prediction"].map(
-        {
-            1: "Normal",
-            -1: "Warning",
-        }
-    )
+META_FILE.write_text(
+    "\n".join(feature_columns),
+    encoding="utf-8",
+)
 
-    data.loc[
-        (data["predicted_status"] == "Warning")
-        & (data["anomaly_score"] < -0.08),
-        "predicted_status",
-    ] = "Danger"
-
-    return data
-
-
-def save_results(data: pd.DataFrame) -> None:
-    MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
-    RESULTS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    FIGURE_PATH.parent.mkdir(parents=True, exist_ok=True)
-
-    data.to_csv(RESULTS_PATH, index=False)
-    plt.figure(figsize=(14, 6))
-
-    colors = data["predicted_status"].map(
-        {
-            "Normal": "green",
-            "Warning": "orange",
-            "Danger": "red",
-        }
-    )
-
-    plt.scatter(
-        data["timestamp"],
-        data["temperature"],
-        c=colors,
-        s=18,
-    )
-
-    plt.xlabel("Time")
-    plt.ylabel("Temperature")
-    plt.title("Predicted Equipment Status")
-    plt.xticks(rotation=45)
-    plt.grid(alpha=0.3)
-    plt.tight_layout()
-    plt.savefig(FIGURE_PATH, dpi=150)
-    plt.close()
-
-
-def main() -> None:
-    data = load_data()
-    model = train_model(data)
-    predictions = create_predictions(data, model)
-
-    joblib.dump(model, MODEL_PATH)
-    save_results(predictions)
-
-    print("Model training completed.")
-    print(f"Model saved to: {MODEL_PATH}")
-    print(f"Predictions saved to: {RESULTS_PATH}")
-    print(f"Figure saved to: {FIGURE_PATH}")
-    print()
-    print(predictions["predicted_status"].value_counts())
-
-
-if __name__ == "__main__":
-    main()
+print()
+print("Training completed.")
+print(f"Model saved to: {MODEL_FILE}")
+print(f"Features saved to: {META_FILE}")
