@@ -1,4 +1,4 @@
-.env
+﻿.env
 .env.*
 !.env.example
 
@@ -15,4 +15,5 @@ results/metropt3_predictions.csv
 results/predictions.csv
 results/sensor_trends.png
 results/status_distribution.png
+
 data/metropt3_labeled.csv
