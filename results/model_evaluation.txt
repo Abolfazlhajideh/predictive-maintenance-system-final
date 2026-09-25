@@ -1,0 +1,28 @@
+MetroPT-3 Model Evaluation
+==========================
+
+Note: No ground-truth failure column is available.
+Therefore precision, recall, F1-score, and confusion matrix cannot be calculated yet.
+
+Rows analyzed: 99999
+
+Status counts:
+status
+Normal     94999
+Warning     4000
+Danger      1000
+
+Anomaly prediction counts:
+anomaly_prediction
+ 1    98999
+-1     1000
+
+Anomaly score statistics:
+count    99999.000000
+mean         0.228306
+std          0.072931
+min         -0.059434
+25%          0.216049
+50%          0.252924
+75%          0.276059
+max          0.304667
