@@ -1,71 +1,38 @@
 from pathlib import Path
-
-import matplotlib.pyplot as plt
 import pandas as pd
-from sklearn.metrics import classification_report, confusion_matrix, ConfusionMatrixDisplay
 
+ROOT = Path(__file__).resolve().parents[1]
+input_file = ROOT / "results" / "metropt3_predictions.csv"
+output_file = ROOT / "results" / "model_evaluation.txt"
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+df = pd.read_csv(input_file)
 
-PREDICTIONS_PATH = PROJECT_ROOT / "results" / "predictions.csv"
-FIGURE_PATH = PROJECT_ROOT / "results" / "figures" / "confusion_matrix.png"
+required = {"status", "anomaly_score", "anomaly_prediction"}
+missing = required - set(df.columns)
 
+if missing:
+    raise ValueError(f"Missing columns: {missing}")
 
-def main() -> None:
-    data = pd.read_csv(PREDICTIONS_PATH)
+status_counts = df["status"].value_counts()
+prediction_counts = df["anomaly_prediction"].value_counts()
+score_stats = df["anomaly_score"].describe()
 
-    data["actual_status"] = data["status"].replace(
-        {
-            "Normal": "Normal",
-            "Danger": "Danger",
-        }
-    )
+report = (
+    "MetroPT-3 Model Evaluation\n"
+    "==========================\n\n"
+    "Note: No ground-truth failure column is available.\n"
+    "Therefore precision, recall, F1-score, and confusion matrix "
+    "cannot be calculated yet.\n\n"
+    f"Rows analyzed: {len(df)}\n\n"
+    "Status counts:\n"
+    f"{status_counts.to_string()}\n\n"
+    "Anomaly prediction counts:\n"
+    f"{prediction_counts.to_string()}\n\n"
+    "Anomaly score statistics:\n"
+    f"{score_stats.to_string()}\n"
+)
 
-    data["predicted_binary_status"] = data["predicted_status"].replace(
-        {
-            "Normal": "Normal",
-            "Warning": "Danger",
-            "Danger": "Danger",
-        }
-    )
+output_file.write_text(report, encoding="utf-8")
 
-    labels = ["Normal", "Danger"]
-
-    matrix = confusion_matrix(
-        data["actual_status"],
-        data["predicted_binary_status"],
-        labels=labels,
-    )
-
-    print("Confusion Matrix:")
-    print(matrix)
-    print()
-
-    print("Classification Report:")
-    print(
-        classification_report(
-            data["actual_status"],
-            data["predicted_binary_status"],
-            labels=labels,
-            zero_division=0,
-        )
-    )
-
-    display = ConfusionMatrixDisplay(
-        confusion_matrix=matrix,
-        display_labels=labels,
-    )
-
-    display.plot(cmap="Blues")
-    plt.title("Confusion Matrix")
-    plt.tight_layout()
-
-    FIGURE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(FIGURE_PATH, dpi=150)
-    plt.close()
-
-    print(f"Confusion matrix saved to: {FIGURE_PATH}")
-
-
-if __name__ == "__main__":
-    main()
+print(report)
+print(f"\nSaved to: {output_file}")
