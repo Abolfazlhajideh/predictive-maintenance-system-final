@@ -11,3 +11,7 @@ telegram_log.txt
 
 data/metropt3_dataset.zip
 data/MetroPT3.csv
+results/metropt3_predictions.csv
+results/predictions.csv
+results/sensor_trends.png
+results/status_distribution.png
